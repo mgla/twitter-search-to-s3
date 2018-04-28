@@ -1,0 +1,3 @@
+*.zip
+bindata.go
+twitter-search-to-s3
