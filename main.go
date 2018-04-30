@@ -70,39 +70,50 @@ func searchTwitter() {
 	v.Set("count", "100")
 	searchRes, err := api.GetSearch(searchTerm, v)
 	if err != nil {
-		log.Error(err)
+		log.Error(fmt.Sprintf("Error: %s", err))
 	}
 	s3session := s3.New(s)
 	for _ , tweet := range searchRes.Statuses {
 		json, _ := json.Marshal(tweet)
 		s3key := s3prefix + tweet.IdStr + ".json"
-		head, err := s3session.HeadObject(&s3.HeadObjectInput{
+		log.Info(fmt.Sprintf("Check if tweet %s already in bucket", tweet.IdStr))
+		_, err := s3session.HeadObject(&s3.HeadObjectInput{
 			Bucket:               aws.String(s3bucket),
-			Key:                  aws.String(s3key+"nope"),
+			Key:                  aws.String(s3key),
 		})
-		fmt.Println(head)
-		if (err) {
+		upload := false
+		if err != nil {
 			if aerr, ok := err.(awserr.Error); ok {
 				switch aerr.Code() {
+				case s3.ErrCodeNoSuchBucket:
+					log.Fatal(fmt.Sprintf("Bucket does not exist: %s", err))
+				case s3.ErrCodeNoSuchKey:
+					log.Info(fmt.Sprintf("Object does not exist in bucket %s", err))
+					upload = true
+				case "NotFound":  // this seems to be an undocumented aws-sdk behaviour..
+					log.Info("Object does not exist in bucket. Upload.")
+					log.Debug(fmt.Sprintf("Error: %s", err))
+					upload = true
 				default:
-					fmt.Println(aerr.Error())
+					log.Fatal(fmt.Sprintf("Unknown AWS error: %s", aerr.Code()))
 				}
 			} else {
-				// Print the error, cast err to awserr.Error to get the Code and
-				// Message from an error.
-				fmt.Println(err.Error())
+				log.Fatal(fmt.Sprintf("Unknown error: %s", err))
 			}
-			return
+		} else {
+			log.Info(fmt.Sprintf("File exists, won't upload: %s/%s", s3bucket, s3key))
 		}
-		log.Info(fmt.Sprintf("Write s3://%s/%s", s3bucket, s3key))
-		_, err = s3session.PutObject(&s3.PutObjectInput{
-			Bucket:               aws.String(s3bucket),
-			Body:                 bytes.NewReader(json),
-			Key:                  aws.String(s3key),
-			ServerSideEncryption: aws.String("AES256"),
-		})
-		if err != nil {
-			log.Fatal(err)
+		if upload {
+			log.Info(fmt.Sprintf("Write s3://%s/%s", s3bucket, s3key))
+			_, err = s3session.PutObject(&s3.PutObjectInput{
+				Bucket:               aws.String(s3bucket),
+				Body:                 bytes.NewReader(json),
+				Key:                  aws.String(s3key),
+				ServerSideEncryption: aws.String("AES256"),
+			})
+			if err != nil {
+				log.Fatal(fmt.Sprintf("Fatal: %s", err))
+			}
 		}
 	}
 }
